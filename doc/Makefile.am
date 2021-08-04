@@ -42,6 +42,7 @@ TXT3 = \
         modbus_set_bits_from_bytes.txt \
         modbus_set_bits_from_byte.txt \
         modbus_set_byte_timeout.txt \
+        modbus_set_compliant.txt \
         modbus_set_debug.txt \
         modbus_set_error_recovery.txt \
         modbus_set_float.txt \

@@ -1,0 +1,31 @@
+modbus_set_compliant(3)
+=======================
+
+NAME
+----
+modbus_set_compliant - set compliant flag of the context
+
+
+SYNOPSIS
+--------
+*int modbus_set_compliant(modbus_t *'ctx', int 'flag');*
+
+
+DESCRIPTION
+-----------
+The *modbus_set_compliant()* function shall set the compliant flag of the
+*modbus_t* context by using the argument _flag_. By default, the boolean flag is
+set to `TRUE`. When the _flag_ value is set to `FALSE`, different non-standard
+behaviors to the protocol are allowed:
+- slave adresses between 247 and 255 are allowed.
+
+
+RETURN VALUE
+------------
+The function shall return 0 if successful. Otherwise it shall return -1 and set errno.
+
+
+AUTHORS
+-------
+The libmodbus documentation was written by Stéphane Raimbault
+<stephane.raimbault@gmail.com>

@@ -120,8 +120,10 @@ Free libmodbus context::
 Set slave ID::
     linkmb:modbus_set_slave[3]
 
-Enable debug mode::
+Enable a specific mode::
+    linkmb:modbus_set_compliant[3]
     linkmb:modbus_set_debug[3]
+    linkmb:modbus_set_error_recovery[3]
 
 Timeout settings::
     linkmb:modbus_get_byte_timeout[3]
@@ -130,9 +132,6 @@ Timeout settings::
     linkmb:modbus_set_response_timeout[3]
     linkmb:modbus_get_indication_timeout[3]
     linkmb:modbus_set_indication_timeout[3]
-
-Error recovery mode::
-    linkmb:modbus_set_error_recovery[3]
 
 Setter/getter of internal socket::
     linkmb:modbus_set_socket[3]
