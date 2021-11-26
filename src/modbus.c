@@ -1578,6 +1578,9 @@ void _modbus_init_common(modbus_t *ctx)
 
     ctx->indication_timeout.tv_sec = 0;
     ctx->indication_timeout.tv_usec = 0;
+
+    ctx->steppers = NULL;
+    ctx->n_steppers = 0;
 }
 
 /* Define the slave number */
@@ -1909,3 +1912,354 @@ size_t strlcpy(char *dest, const char *src, size_t dest_size)
     return (s - src - 1); /* count does not include NUL */
 }
 #endif
+
+/*
+ * Set callbacks for compute length of receiving steps of user response
+ *
+ * Each callback corresponds to a step (for example, the step after receiving
+ * the function code, the step after receiving the number of registers).
+ * The number of bytes of the message received in the first step: header + 1
+ * (function code), then exactly as much as calculated in the previous step.
+ *
+ * Callback should process exception.
+ *
+ * If callback can't process, it should return 0.
+ */
+int modbus_set_rsp_steppers(modbus_t *ctx, modbus_msg_parser_t *steppers, int n_steppers)
+{
+  if (ctx == NULL) {
+    errno = EINVAL;
+    return -1;
+  }
+
+  ctx->steppers = steppers;
+  ctx->n_steppers = n_steppers;
+  return 0;
+}
+
+/*
+ * Set callback for compute user response length using request
+ *
+ * Callback should process exception.
+ * 
+ * If callback can't process, it should return 0.
+ */
+int modbus_set_rsp_length_computer(modbus_t *ctx, modbus_msg_parser_t computer)
+{
+  if (ctx == NULL) {
+    errno = EINVAL;
+    return -1;
+  }
+
+  ctx->compute_rsp_length = computer;
+  return 0;
+}
+
+/*
+ * Set callback for comparator user request and response
+ *
+ * For example callback may check the number of values is
+ * corresponding to the request.
+ * In an exceptional situation callback should return -1 else 1.
+ */
+int modbus_set_comparator(modbus_t *ctx, modbus_comparator_t comparator)
+{
+  if (ctx == NULL) {
+    errno = EINVAL;
+    return -1;
+  }
+
+  ctx->compare = comparator;
+  return 0;
+}
+
+/*
+ * Analogue of modbus_receive_msg
+ */
+static int modbus_user_receive_msg(modbus_t *ctx, uint8_t *msg, msg_type_t msg_type)
+{
+  int rc;
+  fd_set rset;
+  struct timeval tv;
+  struct timeval *p_tv;
+  int length_to_read;
+  int msg_length = 0;
+  int step;
+
+  if (ctx->debug) {
+    if (msg_type == MSG_INDICATION) {
+      printf("Waiting for an indication...\n");
+    } else {
+      printf("Waiting for a confirmation...\n");
+    }
+  }
+
+  /* Add a file descriptor to the set */
+  FD_ZERO(&rset);
+  FD_SET(ctx->s, &rset);
+
+  /* We need to analyse the message step by step.  At the first step, we want
+   * to reach the function code because all packets contain this
+   * information. */
+  step = 0;
+  length_to_read = ctx->backend->header_length + 1;
+
+  if (msg_type == MSG_INDICATION) {
+    /* Wait for a message, we don't know when the message will be
+     * received */
+    if (ctx->indication_timeout.tv_sec == 0 && ctx->indication_timeout.tv_usec == 0) {
+      /* By default, the indication timeout isn't set */
+      p_tv = NULL;
+    } else {
+      /* Wait for an indication (name of a received request by a server, see schema) */
+      tv.tv_sec = ctx->indication_timeout.tv_sec;
+      tv.tv_usec = ctx->indication_timeout.tv_usec;
+      p_tv = &tv;
+    }
+  } else {
+    tv.tv_sec = ctx->response_timeout.tv_sec;
+    tv.tv_usec = ctx->response_timeout.tv_usec;
+    p_tv = &tv;
+  }
+
+  while (length_to_read != 0) {
+    rc = ctx->backend->select(ctx, &rset, p_tv, length_to_read);
+    if (rc == -1) {
+      _error_print(ctx, "select");
+      if (ctx->error_recovery & MODBUS_ERROR_RECOVERY_LINK) {
+        int saved_errno = errno;
+
+        if (errno == ETIMEDOUT) {
+          _sleep_response_timeout(ctx);
+          modbus_flush(ctx);
+        } else if (errno == EBADF) {
+          modbus_close(ctx);
+          modbus_connect(ctx);
+        }
+        errno = saved_errno;
+      }
+      return -1;
+    }
+
+    rc = ctx->backend->recv(ctx, msg + msg_length, length_to_read);
+    if (rc == 0) {
+      errno = ECONNRESET;
+      rc = -1;
+    }
+
+    if (rc == -1) {
+      _error_print(ctx, "read");
+      if ((ctx->error_recovery & MODBUS_ERROR_RECOVERY_LINK)
+          && (errno == ECONNRESET || errno == ECONNREFUSED || errno == EBADF)) {
+        int saved_errno = errno;
+        modbus_close(ctx);
+        modbus_connect(ctx);
+        /* Could be removed by previous calls */
+        errno = saved_errno;
+      }
+      return -1;
+    }
+
+    /* Display the hex code of each character received */
+    if (ctx->debug) {
+      int i;
+      for (i = 0; i < rc; i++) printf("<%.2X>", msg[msg_length + i]);
+    }
+
+    /* Sums bytes received */
+    msg_length += rc;
+    /* Computes remaining bytes */
+    length_to_read -= rc;
+
+    if (length_to_read == 0) {
+      if (step < ctx->n_steppers && ctx->steppers[step]) {
+        length_to_read = ctx->steppers[step](ctx->backend->header_length, msg);
+        step += 1;
+      }
+    }
+
+    if (length_to_read > 0 && (ctx->byte_timeout.tv_sec > 0 || ctx->byte_timeout.tv_usec > 0)) {
+      /* If there is no character in the buffer, the allowed timeout
+               interval between two consecutive bytes is defined by
+               byte_timeout */
+      tv.tv_sec = ctx->byte_timeout.tv_sec;
+      tv.tv_usec = ctx->byte_timeout.tv_usec;
+      p_tv = &tv;
+    }
+    /* else timeout isn't set again, the full response must be read before
+           expiration of response timeout (for CONFIRMATION only) */
+  }
+
+  if (ctx->debug) printf("\n");
+
+  return ctx->backend->check_integrity(ctx, msg, msg_length);
+}
+
+/*
+ * Analogue of check_confirmation
+ */
+static int
+  check_user_confirmation(modbus_t *ctx, const uint8_t *req, const uint8_t *rsp, int rsp_length)
+{
+  int rc;
+  int rsp_length_computed;
+  const int offset = ctx->backend->header_length;
+  const int function = rsp[offset];
+
+  if (ctx->backend->pre_check_confirmation) {
+    rc = ctx->backend->pre_check_confirmation(ctx, req, rsp, rsp_length);
+    if (rc == -1) {
+      if (ctx->error_recovery & MODBUS_ERROR_RECOVERY_PROTOCOL) {
+        _sleep_response_timeout(ctx);
+        modbus_flush(ctx);
+      }
+      return -1;
+    }
+  }
+  rsp_length_computed = ctx->compute_rsp_length(offset, req);
+
+  /* Exception code */
+  if (function >= 0x80) {
+    if (req[offset] == (rsp[offset] - 0x80) && (rsp_length_computed == rsp_length)) {
+      /* Valid exception code received */
+
+      int exception_code = rsp[offset + 1];
+      if (exception_code < MODBUS_EXCEPTION_MAX) {
+        errno = MODBUS_ENOBASE + exception_code;
+      } else {
+        errno = EMBBADEXC;
+      }
+      _error_print(ctx, NULL);
+      return -1;
+    } else {
+      errno = EMBBADEXC;
+      _error_print(ctx, NULL);
+      return -1;
+    }
+  }
+
+  /* Check length */
+  if (rsp_length == rsp_length_computed || rsp_length_computed == MSG_LENGTH_UNDEFINED) {
+    /* Check function code */
+    if (function != req[offset]) {
+      if (ctx->debug) {
+        fprintf(stderr,
+          "Received function not corresponding to the request (0x%X != 0x%X)\n",
+          function,
+          req[offset]);
+      }
+      if (ctx->error_recovery & MODBUS_ERROR_RECOVERY_PROTOCOL) {
+        _sleep_response_timeout(ctx);
+        modbus_flush(ctx);
+      }
+      errno = EMBBADDATA;
+      return -1;
+    }
+
+    int comparation = -1;
+    if (ctx->compare(offset, req, rsp)) { comparation = ctx->compare(offset, req, rsp); }
+
+    if (comparation == -1) {
+      if (ctx->debug) { fprintf(stderr, "Quantity not corresponding to the request\n"); }
+
+      if (ctx->error_recovery & MODBUS_ERROR_RECOVERY_PROTOCOL) {
+        _sleep_response_timeout(ctx);
+        modbus_flush(ctx);
+      }
+
+      errno = EMBBADDATA;
+      return -1;
+    }
+  } else {
+    if (ctx->debug) {
+      fprintf(stderr,
+        "Message length not corresponding to the computed length (%d != %d)\n",
+        rsp_length,
+        rsp_length_computed);
+    }
+    if (ctx->error_recovery & MODBUS_ERROR_RECOVERY_PROTOCOL) {
+      _sleep_response_timeout(ctx);
+      modbus_flush(ctx);
+    }
+    errno = EMBBADDATA;
+    return -1;
+  }
+
+  return 0;
+}
+
+static int modbus_user_send_raw_request(modbus_t *ctx, uint8_t* req, const uint8_t *raw_req, int raw_req_length)
+{
+  sft_t sft;
+  int req_length;
+
+  if (ctx == NULL) {
+    errno = EINVAL;
+    return -1;
+  }
+
+  if (raw_req_length < 2 || raw_req_length > (MODBUS_MAX_PDU_LENGTH + 1)) {
+    /* The raw request must contain function and slave at least and
+           must not be longer than the maximum pdu length plus the slave
+           address. */
+    errno = EINVAL;
+    return -1;
+  }
+
+  sft.slave = raw_req[0];
+  sft.function = raw_req[1];
+  /* The t_id is left to zero */
+  sft.t_id = 0;
+  /* This response function only set the header so it's convenient here */
+  req_length = ctx->backend->build_response_basis(&sft, req);
+
+  if (raw_req_length > 2) {
+    /* Copy data after function code */
+    memcpy(req + req_length, raw_req + 2, raw_req_length - 2);
+    req_length += raw_req_length - 2;
+  }
+
+  return send_msg(ctx, req, req_length);
+}
+
+/*
+ * Perform transaction
+ *
+ * The raw request must contain function and slave at least and
+ * must not be longer than the maximum pdu length plus the slave
+ * address.
+ *
+ * In an exceptional situation callback return -1, in another case return PDU length.
+ */
+int modbus_perform_user_tr(modbus_t *ctx, const uint8_t *req, int req_length, uint8_t *rsp_pdu)
+{
+  int rc;
+  uint8_t req_adu[MAX_MESSAGE_LENGTH];
+
+  if (ctx == NULL) {
+    errno = EINVAL;
+    return -1;
+  }
+
+  rc = modbus_user_send_raw_request(ctx, req_adu, req, req_length);
+  if (rc > 0) {
+
+    int i;
+    int offset;
+    int checksum_length;
+    uint8_t rsp[MAX_MESSAGE_LENGTH];
+
+    rc = modbus_user_receive_msg(ctx, rsp, MSG_CONFIRMATION);
+    if (rc == -1) return -1;
+
+    if (check_user_confirmation(ctx, req_adu, rsp, rc) == -1) return -1;
+
+    offset = ctx->backend->header_length;
+    checksum_length = ctx->backend->checksum_length;
+
+    rc = rc - checksum_length - offset;
+
+    for (i = 0; i < rc; i++) { rsp_pdu[i] = rsp[offset + i]; }
+  }
+  return rc;
+}
