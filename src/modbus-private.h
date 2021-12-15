@@ -104,7 +104,6 @@ struct _modbus {
     modbus_msg_parser_t *steppers;
     int n_steppers;
     modbus_msg_parser_t compute_rsp_length;
-    modbus_comparator_t compare;
 };
 
 void _modbus_init_common(modbus_t *ctx);

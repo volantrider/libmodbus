@@ -245,10 +245,6 @@ MODBUS_API int
 
 MODBUS_API int modbus_set_rsp_length_computer(modbus_t *ctx, modbus_msg_parser_t computer);
 
-typedef int (*modbus_comparator_t)(uint8_t header_length, uint8_t *req, uint8_t *rsp);
-
-MODBUS_API int modbus_set_comparator(modbus_t *ctx, modbus_comparator_t comparator);
-
 MODBUS_API int
   modbus_perform_user_tr(modbus_t *ctx, const uint8_t *req, int req_length, uint8_t *rsp_pdu);
 

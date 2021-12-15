@@ -1956,24 +1956,6 @@ int modbus_set_rsp_length_computer(modbus_t *ctx, modbus_msg_parser_t computer)
 }
 
 /*
- * Set callback for comparator user request and response
- *
- * For example callback may check the number of values is
- * corresponding to the request.
- * In an exceptional situation callback should return -1 else 1.
- */
-int modbus_set_comparator(modbus_t *ctx, modbus_comparator_t comparator)
-{
-  if (ctx == NULL) {
-    errno = EINVAL;
-    return -1;
-  }
-
-  ctx->compare = comparator;
-  return 0;
-}
-
-/*
  * Analogue of modbus_receive_msg
  */
 static int modbus_user_receive_msg(modbus_t *ctx, uint8_t *msg, msg_type_t msg_type)
@@ -2152,21 +2134,6 @@ static int
         _sleep_response_timeout(ctx);
         modbus_flush(ctx);
       }
-      errno = EMBBADDATA;
-      return -1;
-    }
-
-    int comparation = -1;
-    if (ctx->compare(offset, req, rsp)) { comparation = ctx->compare(offset, req, rsp); }
-
-    if (comparation == -1) {
-      if (ctx->debug) { fprintf(stderr, "Quantity not corresponding to the request\n"); }
-
-      if (ctx->error_recovery & MODBUS_ERROR_RECOVERY_PROTOCOL) {
-        _sleep_response_timeout(ctx);
-        modbus_flush(ctx);
-      }
-
       errno = EMBBADDATA;
       return -1;
     }
