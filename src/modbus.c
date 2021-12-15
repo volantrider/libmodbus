@@ -1941,8 +1941,8 @@ int modbus_set_rsp_steppers(modbus_t *ctx, modbus_msg_parser_t *steppers, int n_
  * Set callback for compute user response length using request
  *
  * Callback should process exception.
- * 
- * If callback can't process, it should return 0.
+ *
+ * If callback can't process, it should return -1.
  */
 int modbus_set_rsp_length_computer(modbus_t *ctx, modbus_msg_parser_t computer)
 {
