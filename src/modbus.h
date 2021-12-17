@@ -238,12 +238,10 @@ MODBUS_API int modbus_reply(modbus_t *ctx, const uint8_t *req,
 MODBUS_API int modbus_reply_exception(modbus_t *ctx, const uint8_t *req,
                                       unsigned int exception_code);
 
-typedef int (*modbus_msg_parser_t)(uint8_t header_length, const uint8_t *msg);
+typedef int (*modbus_stepper_t)(uint8_t header_length, const uint8_t *msg);
 
 MODBUS_API int
-  modbus_set_rsp_steppers(modbus_t *ctx, modbus_msg_parser_t *steppers, int n_steppers);
-
-MODBUS_API int modbus_set_rsp_length_computer(modbus_t *ctx, modbus_msg_parser_t computer);
+  modbus_set_rsp_steppers(modbus_t *ctx, modbus_stepper_t *steppers, int n_steppers);
 
 MODBUS_API int
   modbus_perform_user_tr(modbus_t *ctx, const uint8_t *req, int req_length, uint8_t *rsp_pdu);

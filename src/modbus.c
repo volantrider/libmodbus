@@ -1921,11 +1921,11 @@ size_t strlcpy(char *dest, const char *src, size_t dest_size)
  * The number of bytes of the message received in the first step: header + 1
  * (function code), then exactly as much as calculated in the previous step.
  *
- * Callback should process exception.
+ * Callback should process exception (return 0).
  *
  * If callback can't process, it should return 0.
  */
-int modbus_set_rsp_steppers(modbus_t *ctx, modbus_msg_parser_t *steppers, int n_steppers)
+int modbus_set_rsp_steppers(modbus_t *ctx, modbus_stepper_t *steppers, int n_steppers)
 {
   if (ctx == NULL) {
     errno = EINVAL;
@@ -1934,24 +1934,6 @@ int modbus_set_rsp_steppers(modbus_t *ctx, modbus_msg_parser_t *steppers, int n_
 
   ctx->steppers = steppers;
   ctx->n_steppers = n_steppers;
-  return 0;
-}
-
-/*
- * Set callback for compute user response length using request
- *
- * Callback should process exception.
- *
- * If callback can't process, it should return -1.
- */
-int modbus_set_rsp_length_computer(modbus_t *ctx, modbus_msg_parser_t computer)
-{
-  if (ctx == NULL) {
-    errno = EINVAL;
-    return -1;
-  }
-
-  ctx->compute_rsp_length = computer;
   return 0;
 }
 
@@ -2084,7 +2066,6 @@ static int
   check_user_confirmation(modbus_t *ctx, const uint8_t *req, const uint8_t *rsp, int rsp_length)
 {
   int rc;
-  int rsp_length_computed;
   const int offset = ctx->backend->header_length;
   const int function = rsp[offset];
 
@@ -2098,7 +2079,6 @@ static int
       return -1;
     }
   }
-  rsp_length_computed = ctx->compute_rsp_length(offset, req);
 
   /* Exception code */
   if (function >= 0x80) {
@@ -2121,29 +2101,13 @@ static int
     }
   }
 
-  /* Check length */
-  if (rsp_length == rsp_length_computed || rsp_length_computed == MSG_LENGTH_UNDEFINED) {
-    /* Check function code */
-    if (function != req[offset]) {
-      if (ctx->debug) {
-        fprintf(stderr,
-          "Received function not corresponding to the request (0x%X != 0x%X)\n",
-          function,
-          req[offset]);
-      }
-      if (ctx->error_recovery & MODBUS_ERROR_RECOVERY_PROTOCOL) {
-        _sleep_response_timeout(ctx);
-        modbus_flush(ctx);
-      }
-      errno = EMBBADDATA;
-      return -1;
-    }
-  } else {
+  /* Check function code */
+  if (function != req[offset]) {
     if (ctx->debug) {
       fprintf(stderr,
-        "Message length not corresponding to the computed length (%d != %d)\n",
-        rsp_length,
-        rsp_length_computed);
+        "Received function not corresponding to the request (0x%X != 0x%X)\n",
+        function,
+        req[offset]);
     }
     if (ctx->error_recovery & MODBUS_ERROR_RECOVERY_PROTOCOL) {
       _sleep_response_timeout(ctx);
@@ -2197,7 +2161,11 @@ static int modbus_user_send_raw_request(modbus_t *ctx, uint8_t* req, const uint8
  * must not be longer than the maximum pdu length plus the slave
  * address.
  *
- * In an exceptional situation callback return -1, in another case return PDU length.
+ * In an exceptional situation callback return -1, in another case return 
+ * PDU length.
+ *
+ * Before calling the function, the callbacks for compute length of receiving 
+ * steps must be set (modbus_set_rsp_steppers).
  */
 int modbus_perform_user_tr(modbus_t *ctx, const uint8_t *req, int req_length, uint8_t *rsp_pdu)
 {
