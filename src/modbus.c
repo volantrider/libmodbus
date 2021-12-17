@@ -2102,7 +2102,8 @@ static int
 
   /* Exception code */
   if (function >= 0x80) {
-    if (req[offset] == (rsp[offset] - 0x80) && (rsp_length_computed == rsp_length)) {
+    if (rsp_length == (offset + 2 + (int)ctx->backend->checksum_length) &&
+        req[offset] == (rsp[offset] - 0x80)) {
       /* Valid exception code received */
 
       int exception_code = rsp[offset + 1];
