@@ -2039,6 +2039,7 @@ static int modbus_user_receive_msg(modbus_t *ctx, uint8_t *msg, msg_type_t msg_t
       if (step < ctx->n_steppers && ctx->steppers[step]) {
         length_to_read = ctx->steppers[step](ctx->backend->header_length, msg);
         step += 1;
+        if (step == ctx->n_steppers) { length_to_read += ctx->backend->checksum_length; }
       }
     }
 
