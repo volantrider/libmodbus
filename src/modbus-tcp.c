@@ -284,6 +284,9 @@ static int _connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen,
         rc = select(sockfd + 1, NULL, &wset, NULL, &tv);
         if (rc <= 0) {
             /* Timeout or fail */
+#ifdef OS_WIN32
+            errno = ETIMEDOUT;// todo
+#endif
             return -1;
         }
 
